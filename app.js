@@ -314,7 +314,7 @@ document.getElementById('footerNewsletter')?.addEventListener('submit',async e=>
   const f=new FormData(e.target),status=document.getElementById('footerNewsletterStatus');
   const email=String(f.get('email')||'').trim().toLowerCase();
   status.textContent='Subscribing…';status.dataset.kind='';
-  const {error}=await supabase.from('subscribers').upsert({email,status:'active'},{onConflict:'email'});
+  const {error}=await supabase.from('subscribers').upsert({email,status:'active'},{onConflict:'email',ignoreDuplicates:true});
   if(error){status.textContent='Could not subscribe just now. Please try again.';status.dataset.kind='error';return;}
   e.target.reset();status.textContent='You are subscribed. Thank you.';status.dataset.kind='success';
 });
