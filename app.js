@@ -105,7 +105,8 @@ window.admin = function(){
 };
 
 window.editor = function(id){
-  if(!window.TIA_DB.user || !['admin','editor'].includes(window.TIA_DB.profile?.role)) return authPage();
+  if(!window.TIA_DB.user) return authPage();
+  if(!['admin','editor'].includes(window.TIA_DB.profile?.role)) return '<main class="wrap page"><div class="eyebrow">EDITORIAL ACCESS</div><h1 class="page-title">Access pending</h1><p>Your account has been created, but an administrator must approve editorial access before you can create or edit articles.</p><a class="btn alt" href="#home">Return to journal</a></main>';
   const p=id ? currentPosts().find(x=>x.id===id) : null;
   return `<main class="wrap page"><div class="title"><div class="eyebrow">EDITOR</div><h1>${p?'Edit Post':'Write New Post'}</h1></div><form class="panel" id="postForm" style="max-width:900px;margin:auto;display:grid;gap:13px"><input type="hidden" name="id" value="${p?esc2(p.id):''}"><label class="eyebrow">Title<input name="title" required value="${p?esc2(p.title):''}"></label><label class="eyebrow">Category<select name="category">${['Identity','History','Reflections','Culture','Society','Essays'].map(c=>`<option ${p?.category===c?'selected':''}>${c}</option>`).join('')}</select></label><label class="eyebrow">Excerpt<textarea name="excerpt" rows="3" required>${p?esc2(p.excerpt):''}</textarea></label><label class="eyebrow">Content<textarea name="content" rows="15" required>${p?esc2(p.body.join('\n\n')):''}</textarea></label><label class="eyebrow">Status<select name="status"><option value="draft" ${p?.status==='draft'?'selected':''}>Draft</option><option value="published" ${!p||p?.status==='published'?'selected':''}>Published</option></select></label><label class="eyebrow">Cover image<input name="cover" type="file" accept="image/*"></label><button class="btn">${p?'SAVE CHANGES':'PUBLISH / SAVE POST'}</button><div id="postStatus" class="status"></div></form></main>`;
 };
@@ -172,7 +173,10 @@ async function bindRouteForms(route){
     });
   }
   if(route==='admin') bindAdmin();
-  if(route==='editor') bindEditor();
+  if(route==='editor') {
+    if(!window.TIA_DB.user) bindAuth();
+    else if(['admin','editor'].includes(window.TIA_DB.profile?.role)) bindEditor();
+  }
 }
 async function bindAuth(){
   document.getElementById('loginForm')?.addEventListener('submit',async e=>{
@@ -208,7 +212,7 @@ async function bindAdmin(){
     }
   };
   window.updateSubmission=async(id,status)=>{await supabase.from('submissions').update({status}).eq('id',id);window.switchAdmin('submissions');};
-  window.viewSubmissionFile=async(id)=>{const {data}=await supabase.from('submissions').select('file_url,title').eq('id',id).single();if(data?.file_url){const w=window.open();w.document.write(`<title>${esc2(data.title)}</title><pre style="white-space:pre-wrap">${esc2(data.file_url.slice(0,120))}…</pre>`)}};
+  window.viewSubmissionFile=async(id)=>{const {data,error}=await supabase.from('submissions').select('file_url,title').eq('id',id).single();if(error||!data?.file_url){alert('No attachment was found.');return;}const {data:signed,error:signError}=await supabase.storage.from('submission-files').createSignedUrl(data.file_url,300);if(signError){alert(signError.message);return;}window.open(signed.signedUrl,'_blank','noopener');};
   window.exportSubscribers=async()=>{const {data}=await supabase.from('subscribers').select('email,first_name,status,created_at').order('created_at',{ascending:false});const csv=['email,first_name,status,created_at',...(data||[]).map(x=>[x.email,x.first_name||'',x.status,x.created_at].map(v=>`"${String(v).replace(/"/g,'""')}"`).join(','))].join('\n');const url=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));const a=document.createElement('a');a.href=url;a.download='inherited-amnesia-subscribers.csv';a.click();URL.revokeObjectURL(url);};
   window.signOut=async()=>{await supabase.auth.signOut();window.TIA_DB.user=null;window.TIA_DB.profile=null;await loadPosts();location.hash='home';};
   window.deletePost=async(id)=>{if(!confirm('Delete this post?'))return;const {error}=await supabase.from('posts').delete().eq('id',id);if(error){alert(error.message);return;}await loadPosts();window.render();};
