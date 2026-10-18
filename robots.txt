@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://inherited-amnesia.vercel.app/sitemap.xml
