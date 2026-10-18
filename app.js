@@ -11,12 +11,281 @@ const esc2 = x => (x ?? '').toString().replace(/[&<>'"]/g, c => ({
 }[c]));
 const date2 = d => new Intl.DateTimeFormat('en-GB',{day:'numeric',month:'short',year:'numeric'}).format(new Date(d));
 const slugify = x => x.toLowerCase().trim().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
+const DOCX_PREFIX = 'TIA_DOCX_V1:';
+const WORD_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+const CORE_TITLE_NS = 'http://purl.org/dc/elements/1.1/';
+
+function decodeDocxContent(content){
+  if(typeof content !== 'string' || !content.startsWith(DOCX_PREFIX)) return null;
+  try {
+    const model = JSON.parse(content.slice(DOCX_PREFIX.length));
+    if(model?.version === 1 && Array.isArray(model.blocks)) return model;
+  } catch(err) { console.warn('Could not decode imported Word content.', err); }
+  return null;
+}
+function directWordChild(node, name){
+  return Array.from(node?.children || []).find(child => child.localName === name) || null;
+}
+function wordAttribute(node, name){
+  return node?.getAttributeNS(WORD_NS, name) || node?.getAttribute('w:' + name) || node?.getAttribute(name) || '';
+}
+function parseWordXml(text){
+  const xml = new DOMParser().parseFromString(text, 'application/xml');
+  if(xml.getElementsByTagName('parsererror').length) throw new Error('Word document XML could not be read. Please open the file in Word and save it as .docx again.');
+  return xml;
+}
+function wordRunStyle(run){
+  const p = directWordChild(run, 'rPr');
+  const enabled = name => {
+    const item = directWordChild(p, name);
+    if(!item) return false;
+    const value = wordAttribute(item, 'val').toLowerCase();
+    return !['0','false','off','none'].includes(value);
+  };
+  const vert = directWordChild(p, 'vertAlign');
+  return {
+    bold: enabled('b') || enabled('bCs'),
+    italic: enabled('i') || enabled('iCs'),
+    underline: enabled('u'),
+    strike: enabled('strike') || enabled('dstrike'),
+    vertical: vert ? wordAttribute(vert, 'val') : ''
+  };
+}
+function appendWordPart(parts, part){
+  if(part.type === 'text' && !part.text) return;
+  const last = parts[parts.length - 1];
+  if(part.type === 'text' && last?.type === 'text' && JSON.stringify(last.style || {}) === JSON.stringify(part.style || {})){
+    last.text += part.text;
+  } else parts.push(part);
+}
+function getWordFootnoteNumber(id, ctx){
+  if(!ctx.footnoteIds.has(String(id))) return null;
+  if(!ctx.footnoteNumbers.has(String(id))){
+    ctx.refOrder.push(String(id));
+    ctx.footnoteNumbers.set(String(id), ctx.refOrder.length);
+  }
+  return ctx.footnoteNumbers.get(String(id));
+}
+function parseWordInline(node, ctx){
+  const parts = [];
+  const walk = (el, style = {}) => {
+    const tag = el.localName;
+    if(tag === 'r'){
+      const nextStyle = { ...style, ...wordRunStyle(el) };
+      for(const child of Array.from(el.children || [])) if(child.localName !== 'rPr') walk(child, nextStyle);
+      return;
+    }
+    if(tag === 't' || tag === 'delText'){
+      appendWordPart(parts, {type:'text', text:el.textContent || '', style});
+      return;
+    }
+    if(tag === 'tab'){
+      appendWordPart(parts, {type:'text', text:'\t', style});
+      return;
+    }
+    if(tag === 'br' || tag === 'cr'){
+      parts.push({type:'break'});
+      return;
+    }
+    if(tag === 'footnoteReference'){
+      if(ctx.inFootnote) return;
+      const id = wordAttribute(el, 'id');
+      const number = getWordFootnoteNumber(id, ctx);
+      if(number) parts.push({type:'footnoteRef', id:String(id), number});
+      return;
+    }
+    if(tag === 'footnoteRef' || tag === 'instrText' || tag === 'delInstrText') return;
+    for(const child of Array.from(el.children || [])) walk(child, style);
+  };
+  walk(node);
+  return parts;
+}
+function parseWordNumbering(xml){
+  const result = new Map();
+  if(!xml) return result;
+  const abstractTypes = new Map();
+  for(const item of Array.from(xml.getElementsByTagNameNS(WORD_NS, 'abstractNum'))){
+    const id = wordAttribute(item, 'abstractNumId');
+    const level = directWordChild(item, 'lvl') || item.getElementsByTagNameNS(WORD_NS, 'lvl')[0];
+    const fmt = level ? wordAttribute(directWordChild(level, 'numFmt'), 'val').toLowerCase() : '';
+    abstractTypes.set(id, fmt === 'bullet' ? 'ul' : 'ol');
+  }
+  for(const item of Array.from(xml.getElementsByTagNameNS(WORD_NS, 'num'))){
+    const id = wordAttribute(item, 'numId');
+    const abstractId = wordAttribute(directWordChild(item, 'abstractNumId'), 'val');
+    result.set(id, abstractTypes.get(abstractId) || 'ul');
+  }
+  return result;
+}
+function parseWordParagraph(paragraph, ctx){
+  const properties = directWordChild(paragraph, 'pPr');
+  const styleId = wordAttribute(directWordChild(properties, 'pStyle'), 'val');
+  const normalized = styleId.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const outline = directWordChild(properties, 'outlineLvl');
+  const outlineValue = outline ? Number(wordAttribute(outline, 'val')) : NaN;
+  let type = 'p';
+  if(normalized === 'title') type = 'docTitle';
+  else if(/^heading[1-3]$/.test(normalized)) type = 'h' + normalized.slice(-1);
+  else if(Number.isFinite(outlineValue) && outlineValue >= 0 && outlineValue <= 2) type = 'h' + (outlineValue + 1);
+  else if(normalized === 'quote' || normalized === 'intensequote') type = 'quote';
+  const numPr = directWordChild(properties, 'numPr');
+  const numId = numPr ? wordAttribute(directWordChild(numPr, 'numId'), 'val') : '';
+  const alignNode = directWordChild(properties, 'jc');
+  const alignValue = alignNode ? wordAttribute(alignNode, 'val').toLowerCase() : '';
+  const align = ({center:'center', right:'right', both:'justify', distribute:'justify'}[alignValue] || '');
+  const parts = parseWordInline(paragraph, ctx);
+  if(numId && numId !== '0') return {type:'listItem', listType:ctx.listTypes.get(numId) || 'ul', parts, align};
+  return {type, parts, align};
+}
+function parseWordTable(table, ctx){
+  const rows = [];
+  for(const row of Array.from(table.children || []).filter(x => x.localName === 'tr')){
+    const cells = [];
+    for(const cell of Array.from(row.children || []).filter(x => x.localName === 'tc')){
+      cells.push(parseWordBlocks(cell, ctx));
+    }
+    rows.push(cells);
+  }
+  return {type:'table', rows};
+}
+function parseWordBlocks(container, ctx){
+  const blocks = [];
+  for(const child of Array.from(container?.children || [])){
+    if(child.localName === 'p') blocks.push(parseWordParagraph(child, ctx));
+    else if(child.localName === 'tbl') blocks.push(parseWordTable(child, ctx));
+  }
+  return blocks;
+}
+function inlinePlainText(parts){
+  return (parts || []).map(part => part.type === 'footnoteRef' ? '[' + part.number + ']' : part.type === 'break' ? '\n' : (part.text || '')).join('');
+}
+function wordBlockPlainText(block){
+  if(!block) return '';
+  if(block.type === 'table') return (block.rows || []).map(row => row.map(cell => (cell || []).map(wordBlockPlainText).filter(Boolean).join(' ')).join(' | ')).join('\n');
+  const text = inlinePlainText(block.parts);
+  return block.type === 'listItem' ? '• ' + text : text;
+}
+function wordModelPlainText(model, includeFootnotes = false){
+  const body = (model.blocks || []).map(wordBlockPlainText).filter(text => text.trim()).join('\n\n');
+  if(!includeFootnotes || !model.footnotes?.length) return body;
+  const notes = model.footnotes.map(note => String(note.number) + '. ' + (note.blocks || []).map(wordBlockPlainText).filter(Boolean).join(' ')).join('\n');
+  return body + '\n\nFOOTNOTES\n' + notes;
+}
+function renderWordInline(parts){
+  return (parts || []).map(part => {
+    if(part.type === 'break') return '<br>';
+    if(part.type === 'footnoteRef'){
+      const n = Number(part.number);
+      return '<sup class="docx-footnote-ref" id="fn-ref-' + n + '"><a href="#fn-note-' + n + '" aria-label="Footnote ' + n + '">' + n + '</a></sup>';
+    }
+    let text = esc2(part.text || '').replace(/\n/g, '<br>');
+    const style = part.style || {};
+    if(style.bold) text = '<strong>' + text + '</strong>';
+    if(style.italic) text = '<em>' + text + '</em>';
+    if(style.underline) text = '<u>' + text + '</u>';
+    if(style.strike) text = '<s>' + text + '</s>';
+    if(style.vertical === 'superscript') text = '<sup>' + text + '</sup>';
+    else if(style.vertical === 'subscript') text = '<sub>' + text + '</sub>';
+    return text;
+  }).join('');
+}
+function renderWordBlocks(blocks){
+  let html = '';
+  for(let i=0; i<(blocks || []).length; i++){
+    const block = blocks[i];
+    if(block.type === 'listItem'){
+      const listType = block.listType === 'ol' ? 'ol' : 'ul';
+      let items = '';
+      while(i < blocks.length && blocks[i].type === 'listItem' && (blocks[i].listType === 'ol' ? 'ol' : 'ul') === listType){
+        items += '<li>' + renderWordInline(blocks[i].parts) + '</li>';
+        i++;
+      }
+      i--;
+      html += '<' + listType + ' class="docx-list">' + items + '</' + listType + '>';
+      continue;
+    }
+    if(block.type === 'table'){
+      const rows = (block.rows || []).map(row => '<tr>' + row.map(cell => '<td>' + renderWordBlocks(cell) + '</td>').join('') + '</tr>').join('');
+      html += '<div class="docx-table-wrap"><table class="docx-table"><tbody>' + rows + '</tbody></table></div>';
+      continue;
+    }
+    const align = block.align ? ' style="text-align:' + block.align + '"' : '';
+    const inline = renderWordInline(block.parts);
+    if(block.type === 'h1') html += '<h2 class="docx-heading"' + align + '>' + inline + '</h2>';
+    else if(block.type === 'h2') html += '<h3 class="docx-heading"' + align + '>' + inline + '</h3>';
+    else if(block.type === 'h3') html += '<h4 class="docx-heading"' + align + '>' + inline + '</h4>';
+    else if(block.type === 'docTitle') html += '<h2 class="docx-title-block"' + align + '>' + inline + '</h2>';
+    else if(block.type === 'quote') html += '<blockquote class="docx-quote"' + align + '>' + inline + '</blockquote>';
+    else html += '<p' + align + '>' + inline + '</p>';
+  }
+  return html;
+}
+function renderWordFootnotes(notes){
+  if(!notes?.length) return '';
+  return '<section class="docx-footnotes" aria-label="Footnotes"><h2>Footnotes</h2><ol>' + notes.map(note => {
+    const n = Number(note.number);
+    return '<li id="fn-note-' + n + '">' + renderWordBlocks(note.blocks) + '<a class="docx-footnote-back" href="#fn-ref-' + n + '" aria-label="Back to footnote reference ' + n + '">↩</a></li>';
+  }).join('') + '</ol></section>';
+}
+async function importWordDocx(file){
+  if(!file || !/\.docx$/i.test(file.name)) throw new Error('Please select a Microsoft Word .docx file. Older .doc files are not supported yet.');
+  if(file.size > 20 * 1024 * 1024) throw new Error('Please keep Word documents under 20 MB.');
+  const module = await import('https://cdn.jsdelivr.net/npm/jszip@3.10.1/+esm');
+  const JSZip = module.default || module;
+  const zip = await JSZip.loadAsync(file);
+  const documentFile = zip.file('word/document.xml');
+  if(!documentFile) throw new Error('This file does not look like a valid .docx document.');
+  const documentXml = parseWordXml(await documentFile.async('string'));
+  const body = documentXml.getElementsByTagNameNS(WORD_NS, 'body')[0];
+  if(!body) throw new Error('No document body was found in this Word file.');
+  const noteFile = zip.file('word/footnotes.xml');
+  const footnoteXml = noteFile ? parseWordXml(await noteFile.async('string')) : null;
+  const footnoteElements = footnoteXml ? Array.from(footnoteXml.getElementsByTagNameNS(WORD_NS, 'footnote')) : [];
+  const footnoteMap = new Map();
+  footnoteElements.forEach(note => {
+    const id = wordAttribute(note, 'id');
+    const noteType = wordAttribute(note, 'type');
+    if(id && Number(id) > 0 && !['separator','continuationSeparator'].includes(noteType)) footnoteMap.set(String(id), note);
+  });
+  const numberingFile = zip.file('word/numbering.xml');
+  const numberingXml = numberingFile ? parseWordXml(await numberingFile.async('string')) : null;
+  const coreFile = zip.file('docProps/core.xml');
+  const coreXml = coreFile ? parseWordXml(await coreFile.async('string')) : null;
+  const titleNode = coreXml?.getElementsByTagNameNS(CORE_TITLE_NS, 'title')[0];
+  const metadataTitle = (titleNode?.textContent || '').trim();
+  const ctx = {footnoteIds:new Set(footnoteMap.keys()), footnoteNumbers:new Map(), refOrder:[], listTypes:parseWordNumbering(numberingXml), inFootnote:false};
+  let blocks = parseWordBlocks(body, ctx);
+  let firstHeadingTitle = '';
+  if(blocks[0] && ['docTitle','h1'].includes(blocks[0].type)) firstHeadingTitle = wordBlockPlainText(blocks[0]).trim();
+  const title = metadataTitle || firstHeadingTitle || file.name.replace(/\.docx$/i, '').replace(/[_-]+/g, ' ').trim();
+  if(blocks[0] && ['docTitle','h1'].includes(blocks[0].type) && wordBlockPlainText(blocks[0]).trim().toLowerCase() === title.toLowerCase()) blocks = blocks.slice(1);
+  ctx.inFootnote = true;
+  const notes = ctx.refOrder.map(id => {
+    const noteElement = footnoteMap.get(id);
+    return {id, number:ctx.footnoteNumbers.get(id), blocks:noteElement ? parseWordBlocks(noteElement, ctx) : []};
+  }).filter(note => note.blocks.length);
+  const model = {version:1, blocks, footnotes:notes};
+  const firstParagraph = blocks.find(block => block.type === 'p' && wordBlockPlainText(block).trim().length > 20);
+  return {
+    model,
+    title,
+    excerpt: (firstParagraph ? wordBlockPlainText(firstParagraph) : wordModelPlainText({blocks,footnotes:[]}, false)).replace(/\s+/g,' ').trim().slice(0,280),
+    plainText:wordModelPlainText(model, true)
+  };
+}
 const thumbClass = category => ({Identity:'face',History:'tree',Reflections:'face',Culture:'books',Society:'tree',Essays:'books'}[category] || 'books');
-const postView = p => ({
-  id:p.id, slug:p.slug, title:p.title, date:p.published_at || p.created_at, category:p.category,
-  thumb:thumbClass(p.category), excerpt:p.excerpt || '', cover_url:p.cover_url || '',
-  body:(p.content || '').split(/\n\s*\n/).filter(Boolean), status:p.status, author_id:p.author_id
-});
+const postView = p => {
+  const rawContent = p.content || '';
+  const richModel = decodeDocxContent(rawContent);
+  const plain = richModel ? wordModelPlainText({blocks:richModel.blocks || [], footnotes:[]}, false) : rawContent;
+  return {
+    id:p.id, slug:p.slug, title:p.title, date:p.published_at || p.created_at, category:p.category,
+    thumb:thumbClass(p.category), excerpt:p.excerpt || '', cover_url:p.cover_url || '',
+    body:plain.split(/\n\s*\n/).filter(Boolean), richModel, richContent:richModel ? rawContent : '',
+    editorText:richModel ? wordModelPlainText(richModel, true) : plain,
+    status:p.status, author_id:p.author_id
+  };
+};
 
 async function sessionState() {
   const {data:{user}} = await supabase.auth.getUser();
