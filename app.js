@@ -513,28 +513,91 @@ async function bindAdmin(){
 }
 
 async function bindEditor(){
-  document.getElementById('postForm')?.addEventListener('submit',async e=>{
-    e.preventDefault(); const f=new FormData(e.target),statusEl=document.getElementById('postStatus'); statusEl.textContent='Saving…';
+  const form = document.getElementById('postForm');
+  if(!form) return;
+  const contentField = form.elements.content;
+  const richField = form.elements.richContent;
+  const docxFile = document.getElementById('docxFile');
+  const docxStatus = document.getElementById('docxStatus');
+  const statusEl = document.getElementById('postStatus');
+  let contentSnapshot = contentField?.value || '';
+
+  docxFile?.addEventListener('change', async () => {
+    const file = docxFile.files?.[0];
+    if(!file) return;
+    docxStatus.textContent = 'Reading the Word document…';
+    docxStatus.dataset.kind = '';
     try{
-      await sessionState(); if(!['admin','editor'].includes(window.TIA_DB.profile?.role)) throw new Error('Editorial access required.');
-      let cover_url=null; const id=f.get('id'); const old=currentPosts().find(p=>p.id===id);
-      if(old?.cover_url) cover_url=old.cover_url;
-      const file=f.get('cover');
+      const imported = await importWordDocx(file);
+      richField.value = DOCX_PREFIX + JSON.stringify(imported.model);
+      contentField.value = imported.plainText;
+      contentSnapshot = contentField.value;
+      const titleField = form.elements.title;
+      const excerptField = form.elements.excerpt;
+      if(!titleField.value.trim()) titleField.value = imported.title;
+      if(!excerptField.value.trim()) excerptField.value = imported.excerpt || imported.title;
+      const noteCount = imported.model.footnotes?.length || 0;
+      docxStatus.textContent = 'Word document imported. ' + noteCount + ' footnote' + (noteCount === 1 ? '' : 's') + ' detected. The footnotes and formatting will be preserved when saved. To keep them, leave the imported Content field unchanged; editing that text switches the post to plain text.';
+      docxStatus.dataset.kind = 'success';
+    }catch(err){
+      richField.value = '';
+      docxStatus.textContent = err?.message || 'Could not import this Word document.';
+      docxStatus.dataset.kind = 'error';
+    }
+  });
+
+  contentField?.addEventListener('input', () => {
+    if(richField.value && contentField.value !== contentSnapshot){
+      richField.value = '';
+      docxStatus.textContent = 'The Content field was edited manually. Saving will use plain text and will not retain Word formatting or clickable footnotes. Upload the original .docx again to preserve them.';
+      docxStatus.dataset.kind = 'error';
+    }
+  });
+
+  form.addEventListener('submit',async e=>{
+    e.preventDefault();
+    const f = new FormData(form);
+    statusEl.textContent = 'Saving…';
+    statusEl.dataset.kind = '';
+    try{
+      await sessionState();
+      if(!['admin','editor'].includes(window.TIA_DB.profile?.role)) throw new Error('Editorial access required.');
+      let cover_url = null;
+      const id = f.get('id');
+      const old = currentPosts().find(p=>p.id===id);
+      if(old?.cover_url) cover_url = old.cover_url;
+      const file = f.get('cover');
       if(file && file.size){
         if(file.size>8*1024*1024) throw new Error('Cover images must be 8MB or smaller.');
-        const ext=(file.name.split('.').pop()||'jpg').toLowerCase(); const path=`posts/${Date.now()}-${slugify(f.get('title'))}.${ext}`;
+        const ext=(file.name.split('.').pop()||'jpg').toLowerCase();
+        const path='posts/'+Date.now()+'-'+slugify(f.get('title'))+'.'+ext;
         const up=await supabase.storage.from('journal-media').upload(path,file,{cacheControl:'3600',upsert:false,contentType:file.type});
         if(up.error) throw up.error;
         cover_url=supabase.storage.from('journal-media').getPublicUrl(path).data.publicUrl;
       }
-      const title=f.get('title').trim(), slug=id?old?.slug:slugify(title);
-      const payload={title,slug,excerpt:f.get('excerpt').trim(),content:f.get('content'),category:f.get('category'),status:f.get('status'),cover_url,published_at:f.get('status')==='published'?(old?.status==='published'?old.date:new Date().toISOString()):null,updated_at:new Date().toISOString(),author_id:window.TIA_DB.user.id};
+      const title=String(f.get('title')||'').trim();
+      const slug=id?old?.slug:slugify(title);
+      const richContent=String(f.get('richContent')||'').trim();
+      const plainContent=String(f.get('content')||'');
+      const payload={
+        title,slug,excerpt:String(f.get('excerpt')||'').trim(),
+        content:richContent || plainContent,
+        category:f.get('category'),status:f.get('status'),cover_url,
+        published_at:f.get('status')==='published'?(old?.status==='published'?old.date:new Date().toISOString()):null,
+        updated_at:new Date().toISOString(),author_id:window.TIA_DB.user.id
+      };
       let result;
-      if(id){ result=await supabase.from('posts').update(payload).eq('id',id); }
-      else { result=await supabase.from('posts').insert(payload); }
+      if(id) result=await supabase.from('posts').update(payload).eq('id',id);
+      else result=await supabase.from('posts').insert(payload);
       if(result.error) throw result.error;
-      await loadPosts(); statusEl.textContent='Saved successfully.'; setTimeout(()=>location.hash='admin',500);
-    }catch(err){statusEl.textContent=err.message||'Unable to save post.';}
+      await loadPosts();
+      statusEl.textContent = 'Saved successfully.';
+      statusEl.dataset.kind = 'success';
+      setTimeout(()=>location.hash='admin',500);
+    }catch(err){
+      statusEl.textContent=err?.message||'Unable to save post.';
+      statusEl.dataset.kind='error';
+    }
   });
 }
 
