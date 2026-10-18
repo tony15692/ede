@@ -130,26 +130,50 @@ async function toDataUrl(file){
 async function bindRouteForms(route){
   if(route==='submission'){
     document.getElementById('submissionForm')?.addEventListener('submit',async e=>{
-      e.preventDefault(); const f=new FormData(e.target),status=document.getElementById('subStatus2'); status.textContent='Sending…';
+      e.preventDefault();
+      const f=new FormData(e.target),status=document.getElementById('subStatus2');
+      status.textContent='Sending submission…';status.dataset.kind='';
+      let filePath=null;
       try{
-        const file=f.get('file'); const fileUrl=await toDataUrl(file);
-        const {error}=await supabase.from('submissions').insert({name:f.get('name'),email:f.get('email'),title:f.get('title'),category:f.get('category'),abstract:f.get('abstract'),file_url:fileUrl});
+        const file=f.get('file');
+        if(file && file.size){
+          if(file.size>2*1024*1024) throw new Error('Please keep the attachment under 2 MB.');
+          const ext=(file.name.split('.').pop()||'txt').toLowerCase().replace(/[^a-z0-9]/g,'');
+          filePath='incoming/'+crypto.randomUUID()+'.'+ext;
+          const upload=await supabase.storage.from('submission-files').upload(filePath,file,{upsert:false,contentType:file.type||'application/octet-stream'});
+          if(upload.error) throw upload.error;
+        }
+        const {error}=await supabase.from('submissions').insert({
+          name:String(f.get('name')||'').trim(),
+          email:String(f.get('email')||'').trim().toLowerCase(),
+          title:String(f.get('title')||'').trim(),
+          category:f.get('category'),
+          abstract:String(f.get('abstract')||'').trim(),
+          file_url:filePath
+        });
         if(error) throw error;
-        e.target.reset(); status.textContent='Thank you. Your submission has been received by the editorial desk.';
-      }catch(err){status.textContent=err.message || 'Submission failed. Please try again.';}
+        e.target.reset();status.textContent='Thank you. Your submission has reached the editorial desk.';status.dataset.kind='success';
+      }catch(err){
+        if(filePath) await supabase.storage.from('submission-files').remove([filePath]);
+        status.textContent=err.message||'Submission failed. Please try again.';status.dataset.kind='error';
+      }
     });
   }
   if(route==='subscribe'){
     document.getElementById('newsletterForm')?.addEventListener('submit',async e=>{
-      e.preventDefault(); const f=new FormData(e.target),status=document.getElementById('newsletterStatus2'); status.textContent='Subscribing…';
-      const {error}=await supabase.from('subscribers').upsert({email:f.get('email').trim().toLowerCase(),first_name:f.get('firstName')||null,status:'active'},{onConflict:'email'});
-      if(error){status.textContent=error.message;return;} e.target.reset();status.textContent='You are subscribed. Welcome to the archive.';
+      e.preventDefault();
+      const f=new FormData(e.target),status=document.getElementById('newsletterStatus2');
+      status.textContent='Subscribing…';status.dataset.kind='';
+      const email=String(f.get('email')||'').trim().toLowerCase();
+      const firstName=String(f.get('firstName')||'').trim()||null;
+      const {error}=await supabase.from('subscribers').upsert({email,first_name:firstName,status:'active'},{onConflict:'email'});
+      if(error){status.textContent='Could not subscribe just now. Please try again.';status.dataset.kind='error';return;}
+      e.target.reset();status.textContent='You are subscribed. Welcome to the archive.';status.dataset.kind='success';
     });
   }
   if(route==='admin') bindAdmin();
   if(route==='editor') bindEditor();
 }
-
 async function bindAuth(){
   document.getElementById('loginForm')?.addEventListener('submit',async e=>{
     e.preventDefault();const f=new FormData(e.target),s=document.getElementById('loginStatus');s.textContent='Signing in…';
@@ -273,8 +297,7 @@ window.addEventListener('hashchange',async()=>{
     await loadPosts();
     if(serial !== renderSerial) return;
     window.render();
-    const route=location.hash.slice(1).split('/')[0]||'home';
-    if(route==='admin' && !window.TIA_DB.user) bindAuth();
+
   }catch(err){showFatal(err);}
 });
 (async function init(){
@@ -283,7 +306,7 @@ window.addEventListener('hashchange',async()=>{
     await sessionState();
     await loadPosts();
     if(serial===renderSerial) window.render();
-    if((location.hash.slice(1).split('/')[0]||'home')==='admin' && !window.TIA_DB.user) bindAuth();
+
   }catch(err){showFatal(err);}
 })();
 window.privacy=()=>'<main class="wrap page"><div class="eyebrow">INFORMATION</div><h1 class="page-title">Privacy</h1><p class="lede">We use details provided through subscriptions and submissions to operate the journal and respond to contributors. Access to submissions and subscriber records is limited to authorized editorial users.</p></main>';
