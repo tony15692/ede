@@ -139,6 +139,29 @@ main{min-height:58vh}.eyebrow{font-size:10px;letter-spacing:.22em;text-transform
 @media(max-width:700px){.wrap{width:calc(100% - 30px)}.hero{grid-template-columns:1fr;gap:30px}.grid3{grid-template-columns:1fr}.action,.action+.action{padding:18px 0;border-right:0;border-bottom:1px solid var(--line)}.action:last-child{border-bottom:0}.posts .post .body{grid-template-columns:80px minmax(0,1fr);grid-template-areas:"category title" "category excerpt" "category date";gap:5px 14px}.post .date{text-align:left}.toolbar{grid-template-columns:1fr 1fr}.archive-layout{grid-template-columns:1fr}.side{border-left:0;border-top:1px solid var(--line);padding:18px 0 0;display:grid;grid-template-columns:1fr 1fr;gap:12px}.split,.subscribe{grid-template-columns:1fr}.admin{grid-template-columns:1fr}.admin-nav{flex-direction:row;align-items:center;overflow-x:auto;border-right:0;border-bottom:1px solid var(--line);padding:10px 0}.admin-nav strong{font-size:12px;padding:0 16px 0 0;margin-right:auto}.admin-main{padding:20px 0}.row{min-width:600px}.admin-table{overflow-x:auto}.foot{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:430px){.wrap{width:calc(100% - 24px)}.toolbar{grid-template-columns:1fr}.archive-item{grid-template-columns:92px minmax(0,1fr);gap:12px}.archive-item .thumb{height:85px}.article-head h1{font-size:38px}.form-grid{grid-template-columns:1fr}.wide{grid-column:auto}.subscribe{grid-template-columns:1fr}.foot{grid-template-columns:1fr}}
 
+
+/* Imported Word-document typography and linked footnotes */
+.docx-content .docx-heading{font:400 1.45em/1.25 var(--serif);letter-spacing:-.015em;margin:1.65em 0 .65em;color:var(--text)}
+.docx-content .docx-title-block{font:400 1.55em/1.2 var(--serif);margin:1.3em 0 .7em;color:var(--text)}
+.docx-content .docx-quote{margin:1.7em 0;padding:5px 0 5px 18px;border-left:2px solid var(--accent);color:var(--soft);font-style:italic}
+.docx-content .docx-list{padding-left:1.6em;margin:0 0 1.5em}
+.docx-content .docx-list li{padding-left:5px;margin:0 0 .55em}
+.docx-table-wrap{max-width:100%;overflow-x:auto;margin:1.8em 0;border:1px solid var(--line)}
+.docx-table{width:100%;border-collapse:collapse;font:14px/1.65 var(--sans);color:var(--soft)}
+.docx-table td{min-width:90px;vertical-align:top;padding:10px 12px;border-right:1px solid var(--line);border-bottom:1px solid var(--line)}
+.docx-table tr:last-child td{border-bottom:0}.docx-table td:last-child{border-right:0}
+.docx-table p{font:inherit!important;color:inherit!important;margin:0 0 6px!important}
+.docx-footnotes{margin:48px 0 0;padding:22px 0 0;border-top:1px solid var(--line);font:14px/1.7 var(--sans);color:var(--muted)}
+.docx-footnotes h2{margin:0 0 18px;color:var(--accent);font:10px/1.4 var(--sans);letter-spacing:.2em;text-transform:uppercase}
+.docx-footnotes ol{padding-left:24px;margin:0}
+.docx-footnotes li{padding-left:8px;margin:0 0 15px;scroll-margin-top:110px}
+.docx-footnotes li p{font:14px/1.7 var(--sans);color:var(--muted);margin:0 0 6px}
+.docx-footnote-ref{font:11px/1 var(--sans);vertical-align:super;line-height:0}
+.docx-footnote-ref a{color:var(--accent);text-decoration:none;border-bottom:1px solid var(--accent-dim);padding:0 1px}
+.docx-footnote-ref a:hover,.docx-footnote-back:hover{color:var(--text)}
+.docx-footnote-back{display:inline-block;margin-left:8px;color:var(--accent);font:12px/1 var(--sans);text-decoration:none}
+#fn-ref-1,#fn-ref-2,#fn-ref-3,#fn-ref-4,#fn-ref-5{scroll-margin-top:110px}
+
 </style>
 </head>
 <body>
