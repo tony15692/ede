@@ -107,7 +107,7 @@ window.admin = function(){
     return `<main class="wrap page"><div class="title"><div class="eyebrow">ACCESS PENDING</div><h1>Awaiting approval</h1><p>Your account is authenticated but does not yet have editorial permissions.</p><a class="btn alt" href="#home">RETURN TO SITE</a></div></main>`;
   }
   const p=currentPosts();
-  return `<main class="admin"><aside class="admin-nav"><strong>THE<br>INHERITED<br>AMNESIA</strong><button class="active" onclick="switchAdmin('posts')">POSTS</button><button onclick="switchAdmin('submissions')">SUBMISSIONS</button><button onclick="switchAdmin('subscribers')">SUBSCRIBERS</button><button onclick="switchAdmin('settings')">SETTINGS</button><a href="#home">VIEW SITE ↗</a></aside><section class="admin-main" id="adminPanel"><div class="admin-bar"><div><div class="eyebrow">DASHBOARD</div><h1>Posts</h1></div><a class="btn" href="#editor">+ WRITE NEW POST</a></div><div class="admin-table"><div class="row header"><div>Title</div><div>Category</div><div>Status</div><div>Action</div></div>${p.map(x=>`<div class="row"><div>${esc2(x.title)}</div><div>${esc2(x.category)}</div><div>${esc2(x.status)}</div><div><button onclick="editPost('${esc2(x.id)}')">EDIT</button> <button onclick="deletePost('${esc2(x.id)}')">DELETE</button></div></div>`).join('')}</div></section></main>`;
+  return `<main class="admin"><aside class="admin-nav"><strong>THE<br>INHERITED<br>AMNESIA</strong><button class="active" onclick="switchAdmin('posts')">POSTS</button><button onclick="switchAdmin('submissions')">SUBMISSIONS</button><button onclick="switchAdmin('subscribers')">SUBSCRIBERS</button><button onclick="switchAdmin('users')">USERS</button><button onclick="switchAdmin('settings')">SETTINGS</button><a href="#home">VIEW SITE ↗</a></aside><section class="admin-main" id="adminPanel"><div class="admin-bar"><div><div class="eyebrow">DASHBOARD</div><h1>Posts</h1></div><a class="btn" href="#editor">+ WRITE NEW POST</a></div><div class="admin-table"><div class="row header"><div>Title</div><div>Category</div><div>Status</div><div>Action</div></div>${p.map(x=>`<div class="row"><div>${esc2(x.title)}</div><div>${esc2(x.category)}</div><div>${esc2(x.status)}</div><div><button onclick="editPost('${esc2(x.id)}')">EDIT</button> <button onclick="deletePost('${esc2(x.id)}')">DELETE</button></div></div>`).join('')}</div></section></main>`;
 };
 
 window.editor = function(id){
@@ -173,7 +173,7 @@ async function bindRouteForms(route){
       status.textContent='Subscribing…';status.dataset.kind='';
       const email=String(f.get('email')||'').trim().toLowerCase();
       const firstName=String(f.get('firstName')||'').trim()||null;
-      const {error}=await supabase.from('subscribers').upsert({email,first_name:firstName,status:'active'},{onConflict:'email'});
+      const {error}=await supabase.from('subscribers').upsert({email,first_name:firstName,status:'active'},{onConflict:'email',ignoreDuplicates:true});
       if(error){status.textContent='Could not subscribe just now. Please try again.';status.dataset.kind='error';return;}
       e.target.reset();status.textContent='You are subscribed. Welcome to the archive.';status.dataset.kind='success';
     });
@@ -213,10 +213,28 @@ async function bindAdmin(){
       panel.innerHTML=`<div class="admin-bar"><div><div class="eyebrow">DASHBOARD</div><h1>Subscribers</h1></div><button class="btn" onclick="exportSubscribers()">EXPORT CSV</button></div><div class="admin-table"><div class="row header" style="grid-template-columns:1fr 1fr 1fr"><div>Email</div><div>First name</div><div>Joined</div></div>${(data||[]).map(s=>`<div class="row" style="grid-template-columns:1fr 1fr 1fr"><div>${esc2(s.email)}</div><div>${esc2(s.first_name||'')}</div><div>${date2(s.created_at)}</div></div>`).join('')||'<div style="padding:22px;color:#888">No subscribers yet.</div>'}</div>`;
       return;
     }
+    if(section==='users'){
+      if(window.TIA_DB.profile?.role!=='admin'){
+        panel.innerHTML='<div class="admin-bar"><div><div class="eyebrow">ACCESS CONTROL</div><h1>Users</h1></div></div><p class="admin-note">Only administrators can change editorial roles.</p>';
+        return;
+      }
+      const {data,error}=await supabase.from('profiles').select('id,display_name,role,created_at').order('created_at',{ascending:false});
+      if(error){panel.innerHTML='<p class="admin-note">Could not load users. Please try again.</p>';return;}
+      const rows=(data||[]).map(u=>{
+        const name=esc2(u.display_name||('User '+u.id.slice(0,8)));
+        const current=u.id===window.TIA_DB.user.id;
+        const roleOptions=['pending','editor','admin'].map(r=>'<option value="'+r+'" '+(u.role===r?'selected':'')+'>'+r+'</option>').join('');
+        const action=current?'Current account':'<select aria-label="Role for '+name+'" id="role-'+u.id+'">'+roleOptions+'</select> <button onclick="updateRole(\''+u.id+'\',document.getElementById(\'role-'+u.id+'\').value)">SAVE ROLE</button>';
+        return '<div class="row" style="grid-template-columns:minmax(160px,1fr) minmax(110px,.8fr) minmax(100px,.8fr) minmax(160px,1fr)"><div>'+name+'<br><span class="muted">'+u.id.slice(0,8)+'</span></div><div>'+esc2(u.role)+'</div><div>'+date2(u.created_at)+'</div><div class="table-actions">'+action+'</div></div>';
+      }).join('');
+      panel.innerHTML='<div class="admin-bar"><div><div class="eyebrow">ACCESS CONTROL</div><h1>Users</h1></div></div><div class="admin-table"><div class="row header" style="grid-template-columns:minmax(160px,1fr) minmax(110px,.8fr) minmax(100px,.8fr) minmax(160px,1fr)"><div>Account</div><div>Role</div><div>Joined</div><div>Change role</div></div>'+(rows||'<div style="padding:22px;color:#888">No user accounts yet.</div>')+'</div><p class="admin-note">New accounts start as pending. Grant administrator access only to people you trust.</p>';
+      return;
+    }
     if(section==='settings'){
       panel.innerHTML=`<div class="admin-bar"><div><div class="eyebrow">ACCOUNT</div><h1>Settings</h1></div></div><div class="panel"><p>Signed in as <strong>${esc2(window.TIA_DB.user?.email)}</strong></p><p>Role: <strong>${esc2(window.TIA_DB.profile?.role)}</strong></p><button class="btn red" onclick="signOut()">SIGN OUT</button></div>`;
     }
   };
+  window.updateRole=async(id,role)=>{if(!['pending','editor','admin'].includes(role)){alert('Invalid role.');return;}const {error}=await supabase.from('profiles').update({role}).eq('id',id);if(error){alert(error.message);return;}await sessionState();window.switchAdmin('users');};
   window.updateSubmission=async(id,status)=>{await supabase.from('submissions').update({status}).eq('id',id);window.switchAdmin('submissions');};
   window.viewSubmissionFile=async(id)=>{const {data,error}=await supabase.from('submissions').select('file_url,title').eq('id',id).single();if(error||!data?.file_url){alert('No attachment was found.');return;}const {data:signed,error:signError}=await supabase.storage.from('submission-files').createSignedUrl(data.file_url,300);if(signError){alert(signError.message);return;}window.open(signed.signedUrl,'_blank','noopener');};
   window.exportSubscribers=async()=>{const {data}=await supabase.from('subscribers').select('email,first_name,status,created_at').order('created_at',{ascending:false});const csv=['email,first_name,status,created_at',...(data||[]).map(x=>[x.email,x.first_name||'',x.status,x.created_at].map(v=>`"${String(v).replace(/"/g,'""')}"`).join(','))].join('\n');const url=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));const a=document.createElement('a');a.href=url;a.download='inherited-amnesia-subscribers.csv';a.click();URL.revokeObjectURL(url);};
