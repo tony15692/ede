@@ -188,13 +188,13 @@ async function bindAuth(){
   document.getElementById('loginForm')?.addEventListener('submit',async e=>{
     e.preventDefault();const f=new FormData(e.target),s=document.getElementById('loginStatus');s.textContent='Signing in…';
     const {error}=await supabase.auth.signInWithPassword({email:f.get('email'),password:f.get('password')});
-    if(error){s.textContent=error.message;return;} await sessionState(); await loadPosts(); location.hash='admin';
+    if(error){s.textContent=error.message;return;} await sessionState(); await loadPosts(); window.render();
   });
   document.getElementById('signupForm')?.addEventListener('submit',async e=>{
     e.preventDefault();const f=new FormData(e.target),s=document.getElementById('signupStatus');s.textContent='Creating account…';
     const {data,error}=await supabase.auth.signUp({email:f.get('email'),password:f.get('password'),options:{data:{display_name:f.get('name')}}});
     if(error){s.textContent=error.message;return;}
-    s.textContent=data.session ? 'Account created. Waiting for editorial approval.' : 'Account created. Check your email to confirm the account. Then return here to sign in.';
+    s.textContent=data.session ? 'Account created. Waiting for editorial approval.' : 'Account created. Check your email to confirm the account. Then return here to sign in.'; if(data.session){await sessionState();await loadPosts();window.render();}
   });
 }
 
