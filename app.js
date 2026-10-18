@@ -4,7 +4,7 @@ const SUPABASE_URL = 'https://uzyawtzbdcfqdfquexga.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_oZfQZQsptiMY3J_EHnJrGg_sFCf5js2';
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-window.TIA_DB = { posts: [], profile: null, user: null, ready: false };
+window.TIA_DB = { posts: [], profile: null, user: null, ready: false, error: null };
 
 const esc2 = x => (x ?? '').toString().replace(/[&<>'"]/g, c => ({
   '&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'
@@ -31,8 +31,14 @@ async function loadPosts() {
   let q = supabase.from('posts').select('*').order(editor ? 'updated_at' : 'published_at',{ascending:false});
   if (!editor) q = q.eq('status','published');
   const {data,error} = await q;
-  if (error) console.error(error);
+  if (error) {
+    console.error('Article query failed:',error);
+    window.TIA_DB.error = error.message || 'Database connection unavailable';
+    window.TIA_DB.ready = true;
+    return;
+  }
   window.TIA_DB.posts = (data || []).map(postView);
+  window.TIA_DB.error = null;
   window.TIA_DB.ready = true;
 }
 
@@ -55,7 +61,7 @@ window.home = function(){
     '<a class="action-item" href="#submission"><span class="action-number">02</span><div><h2>Contribute a story</h2><p>Submit an original essay, account or reflection for review.</p><span class="inline-link">Submission guide ↗</span></div></a>' +
     '<a class="action-item" href="#subscribe"><span class="action-number">03</span><div><h2>Receive dispatches</h2><p>Get new writing and journal announcements by email.</p><span class="inline-link">Join the list ↗</span></div></a></section>' +
     '<section class="section"><div class="section-head"><div><div class="eyebrow">From the journal</div><h2>Recent writing</h2><p>Essays and reflections from the archive.</p></div><a class="inline-link" href="#archive">All articles ↗</a></div>' +
-    '<div class="post-feed">'+(latest.length?latest.map(row).join(''):'<div class="feed-empty">The archive is temporarily unavailable. Please try again shortly.</div>')+'</div></section>' +
+    '<div class="post-feed">'+(latest.length?latest.map(row).join(''):(window.TIA_DB.error?'<div class="feed-empty">The live archive is reconnecting. Please try again in a moment.</div>':'<div class="feed-empty">No articles have been published yet.</div>'))+'</div></section>' +
     '<section class="statement"><div class="statement-label">A note on memory</div><p class="statement-copy">An archive is not neutral. What survives, what is lost, and who gets to narrate the past all shape the world we <em>inherit.</em></p></section></main>';
 };
 
@@ -193,7 +199,7 @@ async function bindAuth(){
 }
 
 async function bindAdmin(){
-  await sessionState(); if(!window.TIA_DB.user){ bindAuth(); return; } if(!['admin','editor'].includes(window.TIA_DB.profile?.role)) return;
+  if(!window.TIA_DB.user){ bindAuth(); return; } if(!['admin','editor'].includes(window.TIA_DB.profile?.role)) return;
   const panel=document.getElementById('adminPanel'); if(!panel)return;
   window.switchAdmin=async section=>{
     if(section==='posts'){await sessionState();await loadPosts();window.render();return;}
@@ -294,24 +300,28 @@ document.getElementById('footerNewsletter')?.addEventListener('submit',async e=>
   if(error){status.textContent='Could not subscribe just now. Please try again.';status.dataset.kind='error';return;}
   e.target.reset();status.textContent='You are subscribed. Thank you.';status.dataset.kind='success';
 });
-window.addEventListener('hashchange',async()=>{
+window.addEventListener('hashchange',()=>{
+  window.render();
   const serial=++renderSerial;
-  try{
-    await sessionState();
-    await loadPosts();
-    if(serial !== renderSerial) return;
-    window.render();
-
-  }catch(err){showFatal(err);}
+  (async()=>{
+    try{
+      await sessionState();
+      await loadPosts();
+      if(serial===renderSerial) window.render();
+    }catch(err){console.error(err);}
+  })();
 });
 (async function init(){
+  window.render();
   const serial=++renderSerial;
   try{
     await sessionState();
     await loadPosts();
     if(serial===renderSerial) window.render();
-
-  }catch(err){showFatal(err);}
+  }catch(err){
+    window.TIA_DB.error=err?.message||'Database connection unavailable';
+    showFatal(err);
+  }
 })();
 window.privacy=()=>'<main class="wrap page"><div class="eyebrow">INFORMATION</div><h1 class="page-title">Privacy</h1><p class="lede">We use details provided through subscriptions and submissions to operate the journal and respond to contributors. Access to submissions and subscriber records is limited to authorized editorial users.</p></main>';
 window.terms=()=>'<main class="wrap page"><div class="eyebrow">INFORMATION</div><h1 class="page-title">Terms of use</h1><p class="lede">Content published by The Inherited Amnesia is offered for reading, discussion and research. Contributors are responsible for originality and accuracy. Publication is subject to editorial review.</p></main>';
