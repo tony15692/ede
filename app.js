@@ -192,7 +192,7 @@ async function bindAuth(){
   });
   document.getElementById('signupForm')?.addEventListener('submit',async e=>{
     e.preventDefault();const f=new FormData(e.target),s=document.getElementById('signupStatus');s.textContent='Creating account…';
-    const {data,error}=await supabase.auth.signUp({email:f.get('email'),password:f.get('password'),options:{data:{display_name:f.get('name')}}});
+    const {data,error}=await supabase.auth.signUp({email:f.get('email'),password:f.get('password'),options:{emailRedirectTo:window.location.origin,data:{display_name:f.get('name')}}});
     if(error){s.textContent=error.message;return;}
     s.textContent=data.session ? 'Account created. Waiting for editorial approval.' : 'Account created. Check your email to confirm the account. Then return here to sign in.'; if(data.session){await sessionState();await loadPosts();window.render();}
   });
