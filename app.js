@@ -60,7 +60,7 @@ window.home = function(){
     '<section class="action-strip" aria-label="Journal actions"><a class="action-item" href="#archive"><span class="action-number">01</span><div><h2>Read the archive</h2><p>Explore essays on inherited memory and contested history.</p><span class="inline-link">Browse articles</span></div></a>' +
     '<a class="action-item" href="#submission"><span class="action-number">02</span><div><h2>Contribute a story</h2><p>Submit an original essay, account or reflection for review.</p><span class="inline-link">Submission guide</span></div></a>' +
     '<a class="action-item" href="#subscribe"><span class="action-number">03</span><div><h2>Receive dispatches</h2><p>Get new writing and journal announcements by email.</p><span class="inline-link">Join the list</span></div></a></section>' +
-    '<section class="section"><div class="section-head"><div><div class="eyebrow">From the journal</div><h2>Recent writing</h2><p>Essays and reflections from the archive.</p></div><a class="inline-link" href="#archive">All articles ↗</a></div>' +
+    '<section class="section"><div class="section-head"><div><div class="eyebrow">From the journal</div><h2>Recent writing</h2><p>Essays and reflections from the archive.</p></div><a class="inline-link" href="#archive">All articles</a></div>' +
     '<div class="post-feed">'+(latest.length?latest.map(row).join(''):(window.TIA_DB.error?'<div class="feed-empty">The live archive is reconnecting. Please try again in a moment.</div>':'<div class="feed-empty">No articles have been published yet.</div>'))+'</div></section>' +
     '<section class="statement"><div class="statement-label">A note on memory</div><p class="statement-copy">An archive is not neutral. What survives, what is lost, and who gets to narrate the past all shape the world we <em>inherit.</em></p></section></main>';
 };
@@ -107,7 +107,7 @@ window.admin = function(){
     return `<main class="wrap page"><div class="title"><div class="eyebrow">ACCESS PENDING</div><h1>Awaiting approval</h1><p>Your account is authenticated but does not yet have editorial permissions.</p><a class="btn alt" href="#home">RETURN TO SITE</a></div></main>`;
   }
   const p=currentPosts();
-  return `<main class="admin"><aside class="admin-nav"><strong>THE<br>INHERITED<br>AMNESIA</strong><button class="active" onclick="switchAdmin('posts')">POSTS</button><button onclick="switchAdmin('submissions')">SUBMISSIONS</button><button onclick="switchAdmin('subscribers')">SUBSCRIBERS</button><button onclick="switchAdmin('users')">USERS</button><button onclick="switchAdmin('settings')">SETTINGS</button><a href="#home">VIEW SITE ↗</a></aside><section class="admin-main" id="adminPanel"><div class="admin-bar"><div><div class="eyebrow">DASHBOARD</div><h1>Posts</h1></div><a class="btn" href="#editor">+ WRITE NEW POST</a></div><div class="admin-table"><div class="row header"><div>Title</div><div>Category</div><div>Status</div><div>Action</div></div>${p.map(x=>`<div class="row"><div>${esc2(x.title)}</div><div>${esc2(x.category)}</div><div>${esc2(x.status)}</div><div><button onclick="editPost('${esc2(x.id)}')">EDIT</button> <button onclick="deletePost('${esc2(x.id)}')">DELETE</button></div></div>`).join('')}</div></section></main>`;
+  return `<main class="admin"><aside class="admin-nav"><strong>THE<br>INHERITED<br>AMNESIA</strong><button class="active" onclick="switchAdmin('posts')">POSTS</button><button onclick="switchAdmin('submissions')">SUBMISSIONS</button><button onclick="switchAdmin('subscribers')">SUBSCRIBERS</button><button onclick="switchAdmin('users')">USERS</button><button onclick="switchAdmin('settings')">SETTINGS</button><a href="#home">VIEW SITE</a></aside><section class="admin-main" id="adminPanel"><div class="admin-bar"><div><div class="eyebrow">DASHBOARD</div><h1>Posts</h1></div><a class="btn" href="#editor">+ WRITE NEW POST</a></div><div class="admin-table"><div class="row header"><div>Title</div><div>Category</div><div>Status</div><div>Action</div></div>${p.map(x=>`<div class="row"><div>${esc2(x.title)}</div><div>${esc2(x.category)}</div><div>${esc2(x.status)}</div><div><button onclick="editPost('${esc2(x.id)}')">EDIT</button> <button onclick="deletePost('${esc2(x.id)}')">DELETE</button></div></div>`).join('')}</div></section></main>`;
 };
 
 window.editor = function(id){
@@ -259,7 +259,7 @@ async function bindEditor(){
         cover_url=supabase.storage.from('journal-media').getPublicUrl(path).data.publicUrl;
       }
       const title=f.get('title').trim(), slug=id?old?.slug:slugify(title);
-      const payload={title,slug,excerpt:f.get('excerpt').trim(),content:f.get('content'),category:f.get('category'),status:f.get('status'),cover_url,published_at:f.get('status')==='published'?(old?.date||new Date().toISOString()):null,updated_at:new Date().toISOString(),author_id:window.TIA_DB.user.id};
+      const payload={title,slug,excerpt:f.get('excerpt').trim(),content:f.get('content'),category:f.get('category'),status:f.get('status'),cover_url,published_at:f.get('status')==='published'?(old?.status==='published'?old.date:new Date().toISOString()):null,updated_at:new Date().toISOString(),author_id:window.TIA_DB.user.id};
       let result;
       if(id){ result=await supabase.from('posts').update(payload).eq('id',id); }
       else { result=await supabase.from('posts').insert(payload); }
