@@ -64,9 +64,7 @@ window.drawArchive = function(){
   list.innerHTML=b.map(p=>`<a class="archive-item" href="#post/${esc2(p.id)}"><div class="thumb ${esc2(p.thumb)}"${coverStyle(p)}></div><div><div class="cat">${esc2(p.category)}</div><h3>${esc2(p.title)}</h3><div class="date">${date2(p.date)}</div><p>${esc2(p.excerpt)}</p></div></a>`).join('')||'<div style="padding:22px;color:#888">No matching articles.</div>';
   const counts={}; a.forEach(p=>counts[p.category]=(counts[p.category]||0)+1);
   document.getElementById('counts2').innerHTML=Object.entries(counts).map(([k,v])=>`<p><span>${esc2(k)}</span><span>${v}</span></p>`).join('');
-  ['cat2','year2','sort2'].forEach(id=>document.getElementById(id)?.addEventListener('change',window.drawArchive));
-  document.getElementById('q2')?.addEventListener('input',window.drawArchive);
-  document.getElementById('search2')?.addEventListener('click',window.drawArchive);
+
 };
 
 window.article = function(id){
@@ -105,9 +103,11 @@ window.editor = function(id){
 
 window.render = function(){
   const h=location.hash.slice(1)||'home',parts=h.split('/');
-  let out=parts[0]==='home'?window.home():parts[0]==='archive'?window.archive():parts[0]==='post'?window.article(parts[1]):parts[0]==='about'?window.about():parts[0]==='submission'?window.submission():parts[0]==='subscribe'?window.subscribe():parts[0]==='admin'?window.admin():parts[0]==='editor'?window.editor(parts[1]):parts[0]==='privacy'?privacy():parts[0]==='terms'?terms():window.home();
+  let out=parts[0]==='home'?window.home():parts[0]==='archive'?window.archive():parts[0]==='post'?window.article(parts[1]):parts[0]==='about'?window.about():parts[0]==='submission'?window.submission():parts[0]==='subscribe'?window.subscribe():parts[0]==='admin'?window.admin():parts[0]==='editor'?window.editor(parts[1]):parts[0]==='privacy'?window.privacy():parts[0]==='terms'?window.terms():window.home();
   document.getElementById('app').innerHTML=out;
-  if(parts[0]==='archive') window.drawArchive();
+  if(parts[0]==='archive') { window.drawArchive(); bindArchiveControls(); }
+  updateNavigation(parts[0]);
+  document.title = parts[0]==='post' ? ((currentPosts().find(p=>p.id===parts[1])?.title || 'Article') + ' — The Inherited Amnesia') : 'The Inherited Amnesia — Journal';
   bindRouteForms(parts[0]);
   window.scrollTo(0,0);
 };
@@ -156,7 +156,7 @@ async function bindAuth(){
 }
 
 async function bindAdmin(){
-  if(!await isEditor()){ window.render(); if(document.getElementById('loginForm')) bindAuth(); return; }
+  await sessionState(); if(!window.TIA_DB.user){ bindAuth(); return; } if(!['admin','editor'].includes(window.TIA_DB.profile?.role)) return;
   const panel=document.getElementById('adminPanel'); if(!panel)return;
   window.switchAdmin=async section=>{
     if(section==='posts'){await sessionState();await loadPosts();window.render();return;}
@@ -212,18 +212,70 @@ const originalPrivacy=window.privacy, originalTerms=window.terms;
 if(typeof originalPrivacy!=='function'){window.privacy=()=>'<main class="wrap page"><div class="title"><div class="eyebrow">LEGAL</div><h1>Privacy</h1></div><article class="panel article-text"><p>We collect information you voluntarily provide through subscriptions and submissions. Production data is stored in Supabase and accessed by authorized editorial staff.</p></article></main>';}
 if(typeof originalTerms!=='function'){window.terms=()=>'<main class="wrap page"><div class="title"><div class="eyebrow">LEGAL</div><h1>Terms of Use</h1></div><article class="panel article-text"><p>Content published by The Inherited Amnesia is intended for reading, discussion and research. Final editorial and copyright terms should be added before public launch.</p></article></main>';}
 
-window.addEventListener('hashchange', async ()=>{
-  await sessionState();
-  await loadPosts();
-  window.render();
-  if(['admin','editor'].includes(window.TIA_DB.profile?.role) && location.hash==='#admin') await bindAdmin();
-  if(location.hash==='#admin' && !window.TIA_DB.user) bindAuth();
-});
-supabase.auth.onAuthStateChange(async()=>{ await sessionState(); if(location.hash==='#admin'){ await loadPosts(); window.render(); if(window.TIA_DB.user) await bindAdmin(); else bindAuth(); }});
 
+let renderSerial = 0;
+function updateNavigation(route){
+  document.querySelectorAll('.navlinks a[data-route]').forEach(a => {
+    if(a.dataset.route === route) a.setAttribute('aria-current','page');
+    else a.removeAttribute('aria-current');
+  });
+  document.getElementById('siteNav')?.classList.remove('open');
+  document.getElementById('menuToggle')?.setAttribute('aria-expanded','false');
+}
+function bindArchiveControls(){
+  const controls = [
+    [document.getElementById('cat2'),'change'],
+    [document.getElementById('year2'),'change'],
+    [document.getElementById('sort2'),'change'],
+    [document.getElementById('q2'),'input'],
+    [document.getElementById('search2'),'click']
+  ];
+  controls.forEach(([node,eventName])=>{
+    if(node && !node.dataset.bound){ node.addEventListener(eventName,window.drawArchive); node.dataset.bound='1'; }
+  });
+}
+function showFatal(err){
+  console.error('The Inherited Amnesia:',err);
+  const app=document.getElementById('app');
+  if(app) app.innerHTML='<main class="wrap page"><div class="eyebrow">TEMPORARY ERROR</div><h1 class="page-title">The page could not be loaded.</h1><p>Please refresh the page. If the problem continues, contact the site administrator.</p><button class="btn alt" id="reloadPage">Reload page</button></main>';
+  document.getElementById('reloadPage')?.addEventListener('click',()=>location.reload());
+}
+document.getElementById('menuToggle')?.addEventListener('click',()=>{
+  const nav=document.getElementById('siteNav'),button=document.getElementById('menuToggle');
+  const open=!nav.classList.contains('open');nav.classList.toggle('open',open);button.setAttribute('aria-expanded',String(open));button.setAttribute('aria-label',open?'Close navigation':'Open navigation');
+});
+document.getElementById('headerSearch')?.addEventListener('click',()=>{
+  if(location.hash!=='#archive') location.hash='#archive';
+  setTimeout(()=>document.getElementById('q2')?.focus(),150);
+});
+document.getElementById('footerNewsletter')?.addEventListener('submit',async e=>{
+  e.preventDefault();
+  const f=new FormData(e.target),status=document.getElementById('footerNewsletterStatus');
+  const email=String(f.get('email')||'').trim().toLowerCase();
+  status.textContent='Subscribing…';status.dataset.kind='';
+  const {error}=await supabase.from('subscribers').upsert({email,status:'active'},{onConflict:'email'});
+  if(error){status.textContent='Could not subscribe just now. Please try again.';status.dataset.kind='error';return;}
+  e.target.reset();status.textContent='You are subscribed. Thank you.';status.dataset.kind='success';
+});
+window.addEventListener('hashchange',async()=>{
+  const serial=++renderSerial;
+  try{
+    await sessionState();
+    await loadPosts();
+    if(serial !== renderSerial) return;
+    window.render();
+    const route=location.hash.slice(1).split('/')[0]||'home';
+    if(route==='admin' && !window.TIA_DB.user) bindAuth();
+  }catch(err){showFatal(err);}
+});
 (async function init(){
-  await sessionState();
-  await loadPosts();
-  window.render();
-  if(location.hash==='#admin' && !window.TIA_DB.user) bindAuth();
+  const serial=++renderSerial;
+  try{
+    await sessionState();
+    await loadPosts();
+    if(serial===renderSerial) window.render();
+    if((location.hash.slice(1).split('/')[0]||'home')==='admin' && !window.TIA_DB.user) bindAuth();
+  }catch(err){showFatal(err);}
 })();
+window.privacy=()=>'<main class="wrap page"><div class="eyebrow">INFORMATION</div><h1 class="page-title">Privacy</h1><p class="lede">We use details provided through subscriptions and submissions to operate the journal and respond to contributors. Access to submissions and subscriber records is limited to authorized editorial users.</p></main>';
+window.terms=()=>'<main class="wrap page"><div class="eyebrow">INFORMATION</div><h1 class="page-title">Terms of use</h1><p class="lede">Content published by The Inherited Amnesia is offered for reading, discussion and research. Contributors are responsible for originality and accuracy. Publication is subject to editorial review.</p></main>';
